@@ -1,10 +1,29 @@
-import librosa
+"""
+Load a song, run it through an ear-inspired filterbank, and plot a cochleagram.
 
-y, fs = librosa.load("KU.wav", sr=None) 
+Cochleagram idea:
+- Split the audio into many overlapping “frequency channels” (low → high).
+- For each channel, track the signal strength over time (the envelope).
+- Stack all channels into a 2D picture: (frequency band) x (time).
+"""
+
+import numpy as np
+import librosa
+import matplotlib.pyplot as plt
+from scipy.signal import fftconvolve, hilbert
+
+
+"""
+Audio loading + standardizing:
+- y = waveform samples (a long array of numbers)
+- fs = sample rate (samples per second)
+We resample to 16 kHz so timing/filter settings are consistent across files,
+then normalize so amplitudes are in a stable range.
+"""
+y, fs = librosa.load("KU.wav", sr=None)
 print(fs)
 
 target_fs = 16000
-
 if fs != target_fs:
     y = librosa.resample(y, orig_sr=fs, target_sr=target_fs)
     fs = target_fs
@@ -12,37 +31,64 @@ if fs != target_fs:
 y = y / (abs(y).max() + 1e-9)
 
 
-import numpy as np
-from scipy.signal import fftconvolve, hilbert
+"""
+ERB spacing utilities:
+ERB (“Equivalent Rectangular Bandwidth”) is a common way to space filters like the ear:
+- bands are more densely packed at low frequencies
+- bands spread out and get wider at high frequencies
+
+These functions do two jobs:
+1) Convert Hz ↔ ERB coordinates (a warped frequency axis).
+2) Choose band center frequencies equally spaced on the ERB axis.
+"""
 def erb_hz(f):
-    return 24.7 * (4.37 * f / 1000 + 1) # our bready and buttery bandy makery
+    """Approx ear bandwidth (in Hz) around frequency f (Hz)."""
+    return 24.7 * (4.37 * f / 1000 + 1)
 
 def erb_scale(f):
-    return 21.4 * np.log10(1 + 0.00437 * f) # convert it into cochlear coordinates
-def inv_erb(e): 
-    # convert back to frequencies
+    """Hz → ERB coordinate."""
+    return 21.4 * np.log10(1 + 0.00437 * f)
+
+def inv_erb(e):
+    """ERB coordinate → Hz."""
     return (10**(e / 21.4) - 1) / 0.00437
-def erb_centers(fmin, fmax, n): # place n filters between fmin and fmax
+
+def erb_centers(fmin, fmax, n):
+    """Pick n center frequencies between fmin and fmax, evenly spaced on the ERB axis."""
     e = np.linspace(erb_scale(fmin), erb_scale(fmax), n)
     return inv_erb(e)
 
 
-# Gammatone filter
+"""
+Gammatone filter:
+A gammatone is a standard ear-inspired bandpass filter shape.
+Given a center frequency fc, it produces a short “ringing” impulse response.
+Convolving audio with this impulse response extracts the content near fc.
+"""
 def gammatone(fs, fc, n=4, dur=0.08):
-    t = np.arange(0, int(dur*fs)) / fs
-    b = 1.019 * erb_hz(fc)
-    g = t**(n-1) * np.exp(-2*np.pi*b*t) * np.cos(2*np.pi*fc*t)
-    return g / np.sqrt(np.sum(g**2))
+    t = np.arange(0, int(dur * fs)) / fs
+    b = 1.019 * erb_hz(fc)  # bandwidth term (wider at higher fc)
+    g = t**(n - 1) * np.exp(-2 * np.pi * b * t) * np.cos(2 * np.pi * fc * t)
+    return g / np.sqrt(np.sum(g**2))  # normalize so bands are comparable
 
 
+"""
+Build the cochleagram:
+- Choose N ERB-spaced center frequencies between 100 and 10,000 Hz.
+- For each center fc:
+    - filter the audio with a gammatone filter
+    - compute the amplitude envelope via Hilbert transform
+    - log-compress (helps visibility + mimics dynamic range compression)
+Result:
+- C is a 2D array shaped (band, time)
+"""
 N = 32
 centers = erb_centers(100, 10000, N)
 
 coch = []
 
-target_fc = 1000 #Hz 
+target_fc = 1000  # optional: keep one “example” band if we want to inspect it later
 band_idx = np.argmin(np.abs(centers - target_fc))
-
 y_filt_example = None
 
 for i, fc in enumerate(centers):
@@ -55,104 +101,34 @@ for i, fc in enumerate(centers):
     env = np.abs(hilbert(y_filt))
     coch.append(np.log1p(env))
 
-# After the loop we should get something that looks like
-# coch = [
-#   env_1[t],   # band 1
-#   env_2[t],   # band 2...
-#   env_32[t]   # band 32
-# ]
-
-C = np.vstack(coch) # returns C[band, time]
+C = np.vstack(coch)  # C[band, time]
 
 
-import matplotlib.pyplot as plt
+"""
+Plot a time slice of the cochleagram:
+imshow shows C as an image:
+- x-axis: time (seconds)
+- y-axis: band index (we relabel ticks with the band center frequencies in Hz)
+- color: “response” (log(1 + envelope))
+"""
+t0, t1 = 30, 45
+i0, i1 = int(t0 * fs), int(t1 * fs)
 
+plt.figure(figsize=(10, 4))
+plt.imshow(
+    C[:, i0:i1],
+    aspect="auto",
+    origin="lower",
+    extent=[t0, t1, 0, N - 1]
+)
 
+plt.ylabel("Band index")
 
-# t = np.arange(len(y)) / fs  # time axis in seconds
-# t_zoom = 0.02  # seconds
-# idx = t < t_zoom
-
-# plt.figure(figsize=(10, 3))
-# plt.plot(t[idx], y[idx])
-# plt.xlabel("Time (s)")
-# plt.ylabel("Amplitude")
-# plt.title("Audio waveform (first 20 ms)")
-# plt.tight_layout()
-# plt.show()
-
-
-
-
-# plt.figure(figsize=(10,4))
-# t0, t1 = 30, 45  # seconds
-# i0, i1 = int(t0*fs), int(t1*fs)
-
-# plt.imshow(
-#     C[:, i0:i1],
-#     aspect="auto",
-#     origin="lower",
-#     extent=[t0, t1, 0, N-1]   # y-axis is band index
-# )
-# plt.ylabel("Band index")
-
-# # put y-ticks at actual center freqs
-# tick_idx = np.linspace(0, N-1, 6).astype(int)
-# plt.yticks(tick_idx, [f"{centers[i]:.0f}" for i in tick_idx])
-
-# plt.xlabel("Time (s)")
-# plt.title("Cochleagram (Kali Uchis - Tele)")
-# plt.colorbar(label="Response")
-# plt.tight_layout()
-# plt.show()
-
-
-# # time axis
-# t = np.arange(len(y_filt_example)) / fs
-
-# # zoom window (e.g. first 10 ms)
-# t_zoom = 0.01
-# idx = t < t_zoom
-
-# plt.figure(figsize=(10, 3))
-# plt.plot(t[idx], y_filt_example[idx])
-# plt.xlabel("Time (s)")
-# plt.ylabel("Amplitude")
-# plt.title("Raw gammatone filter output (≈1 kHz band)")
-# plt.tight_layout()
-# plt.show()
-
-
-# env_example = np.abs(hilbert(y_filt_example))
-
-# plt.figure(figsize=(10, 3))
-# plt.plot(t[idx], y_filt_example[idx], label="Filtered signal")
-# plt.plot(t[idx], env_example[idx], 'r', linewidth=2, label="Envelope")
-# plt.xlabel("Time (s)")
-# plt.ylabel("Amplitude")
-# plt.title("Filtered signal and Hilbert envelope")
-# plt.legend()
-# plt.tight_layout()
-# plt.show()
-
-
-
-t = np.arange(len(y_filt_example)) / fs
-
-t0, t1 = 0.0, 0.005  # 5 ms window
-i0, i1 = int(t0*fs), int(t1*fs)
-
-plt.figure(figsize=(10, 3))
-plt.plot(t[i0:i1], y_filt_example[i0:i1])
-plt.axhline(0, linewidth=1)
-
-# 1 kHz period markers 
-period = 1/1000
-for k in np.arange(t0, t1 + 1e-12, period):
-    plt.axvline(k, linestyle="--", linewidth=1)
+tick_idx = np.linspace(0, N - 1, 6).astype(int)
+plt.yticks(tick_idx, [f"{centers[i]:.0f}" for i in tick_idx])
 
 plt.xlabel("Time (s)")
-plt.ylabel("Amplitude")
-plt.title("Filtered output ~1 cycle per 1 ms")
+plt.title("Cochleagram (Kali Uchis - Tele)")
+plt.colorbar(label="Response")
 plt.tight_layout()
 plt.show()
