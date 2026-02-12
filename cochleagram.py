@@ -111,24 +111,172 @@ imshow shows C as an image:
 - y-axis: band index (we relabel ticks with the band center frequencies in Hz)
 - color: “response” (log(1 + envelope))
 """
+# t0, t1 = 30, 45
+# i0, i1 = int(t0 * fs), int(t1 * fs)
+
+# plt.figure(figsize=(10, 4))
+# plt.imshow(
+#     C[:, i0:i1],
+#     aspect="auto",
+#     origin="lower",
+#     extent=[t0, t1, 0, N - 1]
+# )
+
+# plt.ylabel("Band index")
+
+# tick_idx = np.linspace(0, N - 1, 6).astype(int)
+# plt.yticks(tick_idx, [f"{centers[i]:.0f}" for i in tick_idx])
+
+# plt.xlabel("Time (s)")
+# plt.title("Cochleagram (Kali Uchis - Tele)")
+# plt.colorbar(label="Response")
+# plt.tight_layout()
+# plt.show()
+
+
+##### _______________________ Pairing with energy profile plot:
 t0, t1 = 30, 45
 i0, i1 = int(t0 * fs), int(t1 * fs)
+low_band = C[0, i0:i1]     # band 1 = lowest frequency
+print(low_band.mean(), low_band.max())
+
+erb_cent = erb_scale(centers)  # ERB coordinate for each band
 
 plt.figure(figsize=(10, 4))
 plt.imshow(
     C[:, i0:i1],
     aspect="auto",
     origin="lower",
-    extent=[t0, t1, 0, N - 1]
+    extent=[t0, t1, 1, N],
+    vmin=np.percentile(C, 5),
+    vmax=np.percentile(C, 95)
 )
-
-plt.ylabel("Band index")
-
-tick_idx = np.linspace(0, N - 1, 6).astype(int)
-plt.yticks(tick_idx, [f"{centers[i]:.0f}" for i in tick_idx])
-
 plt.xlabel("Time (s)")
-plt.title("Cochleagram (Kali Uchis - Tele)")
-plt.colorbar(label="Response")
+plt.ylabel("Channel index (ERB-spaced)")
+tick_idx = np.linspace(0, N-1, 8).astype(int)
+plt.yticks(tick_idx + 1, [f"Ch {i+1}\n({centers[i]:.0f} Hz)" for i in tick_idx])
+plt.title("Cochleagram (30-45s) Telepatia - Kali Uchis")
+plt.savefig("cochleagram.png", dpi=300, bbox_inches="tight")
+
+Cs = C[:, i0:i1]
+E = Cs.mean(axis=1)
+E = E / (E.sum() + 1e-12)
+
+plt.figure(figsize=(9,3))
+plt.plot(np.arange(1, N+1), E)
+
+plt.xlabel("Channel index (low → high)")
+plt.ylabel("Normalized mean energy")
+plt.title("Energy profile over channels (30-45s)")
 plt.tight_layout()
+plt.savefig("energy_profile.png", dpi=300, bbox_inches="tight")
 plt.show()
+
+
+##### _______________________
+"""
+Add-on: Frequency-bucket "histograms" from your cochleagram.
+
+Goal:
+- Collapse C[band, time] over time -> one value per band.
+- Plot bars vs band center frequency (Hz).
+
+This is a proof-of-concept visualization:
+Baseline vs (simulated) hearing-loss levels via:
+  - ERB broadening (bw_mult)
+  - fewer channels (N)
+"""
+
+# import numpy as np
+# import matplotlib.pyplot as plt
+# from scipy.signal import fftconvolve, hilbert
+
+# # -----------------------------
+# # (A) Slightly upgraded gammatone: add bw_mult (ERB broadening)
+# # -----------------------------
+# def gammatone(fs, fc, n=4, dur=0.08, bw_mult=1.0):
+#     t = np.arange(0, int(dur * fs)) / fs
+#     b = bw_mult * 1.019 * erb_hz(fc)  # broadened bandwidth
+#     g = t**(n - 1) * np.exp(-2 * np.pi * b * t) * np.cos(2 * np.pi * fc * t)
+#     return g / np.sqrt(np.sum(g**2) + 1e-12)
+
+
+# # -----------------------------
+# # (B) Build cochleagram given N channels + bw_mult
+# # -----------------------------
+# def build_cochleagram(y, fs, fmin=100, fmax=10000, N=32, bw_mult=1.0):
+#     centers = erb_centers(fmin, fmax, N)
+#     coch = []
+#     for fc in centers:
+#         g = gammatone(fs, fc, bw_mult=bw_mult)
+#         y_filt = fftconvolve(y, g, mode="same")
+#         env = np.abs(hilbert(y_filt))
+#         coch.append(np.log1p(env))
+#     C = np.vstack(coch)
+#     return C, centers
+
+
+# # -----------------------------
+# # (C) Collapse over time -> "frequency bucket histogram"
+# # -----------------------------
+# def freq_bucket_energy(C, fs, centers, t0, t1):
+
+#     i0, i1 = int(t0 * fs), int(t1 * fs)
+#     Cs = C[:, i0:i1]
+
+#     E = Cs.mean(axis=1)
+
+#     # Normalize → energy distribution
+#     P = E / (E.sum() + 1e-12)
+
+#     order = np.argsort(centers)
+
+#     return centers[order], P[order]
+
+# def plot_freq_hist(f, y, ylabel, title):
+#     plt.figure(figsize=(9, 3))
+#     # width ~ 8% of each center frequency (works OK on log scale)
+#     plt.bar(f, y, width=f * 0.08)
+#     plt.xscale("log")
+#     plt.xlabel("Frequency (Hz)")
+#     plt.ylabel(ylabel)
+#     plt.title(title)
+#     plt.tight_layout()
+#     plt.show()
+
+
+# # -----------------------------
+# # (D) Proof-of-concept: 4 levels (paper-style)
+# # -----------------------------
+# # Suggested mapping based on your screenshot:
+# # Normal: 1.0× ERB, 36 channels
+# # Mild:   1.5× ERB, 36 channels
+# # Mod:    2.0× ERB, 28 channels
+# # Severe: 3.0× ERB, 19 channels
+# levels = [
+#     ("Normal",   36, 1.0),
+#     ("Mild",     36, 1.5),
+#     ("Moderate", 28, 2.0),
+#     ("Severe",   19, 3.0),
+# ]
+
+# # Build and plot histograms for the same time window you used
+# t0, t1 = 30, 45
+# for name, N_lvl, bw_mult in levels:
+
+#     C_lvl, centers_lvl = build_cochleagram(
+#         y, fs,
+#         fmin=100,
+#         fmax=10000,
+#         N=N_lvl,
+#         bw_mult=bw_mult
+#     )
+
+#     f, vals = freq_bucket_energy(C_lvl, fs, centers_lvl, t0, t1)
+
+#     plot_freq_hist(
+#         f,
+#         vals,
+#         ylabel="Normalized band energy",
+#         title=f"{name} ({N_lvl} ch, {bw_mult:.1f}×ERB)"
+#     )
