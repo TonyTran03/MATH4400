@@ -65,9 +65,11 @@ A gammatone is a standard ear-inspired bandpass filter shape.
 Given a center frequency fc, it produces a short “ringing” impulse response.
 Convolving audio with this impulse response extracts the content near fc.
 """
-def gammatone(fs, fc, n=4, dur=0.08):
+
+BW_MULTI = 3.0  # severe (temp)
+def gammatone(fs, fc, n=4, dur=0.08,  bw_mult=1.0):
     t = np.arange(0, int(dur * fs)) / fs
-    b = 1.019 * erb_hz(fc)  # bandwidth term (wider at higher fc)
+    b = bw_mult * 1.019 * erb_hz(fc)  # bandwidth term (wider at higher fc)
     g = t**(n - 1) * np.exp(-2 * np.pi * b * t) * np.cos(2 * np.pi * fc * t)
     return g / np.sqrt(np.sum(g**2))  # normalize so bands are comparable
 
@@ -82,7 +84,7 @@ Build the cochleagram:
 Result:
 - C is a 2D array shaped (band, time)
 """
-N = 32
+N = 19
 centers = erb_centers(100, 10000, N)
 
 coch = []
@@ -92,7 +94,7 @@ band_idx = np.argmin(np.abs(centers - target_fc))
 y_filt_example = None
 
 for i, fc in enumerate(centers):
-    g = gammatone(fs, fc)
+    g = gammatone(fs, fc, bw_mult= BW_MULTI)
     y_filt = fftconvolve(y, g, mode="same")
 
     if i == band_idx:
@@ -128,7 +130,7 @@ imshow shows C as an image:
 # plt.yticks(tick_idx, [f"{centers[i]:.0f}" for i in tick_idx])
 
 # plt.xlabel("Time (s)")
-# plt.title("Cochleagram (Kali Uchis - Tele)")
+# plt.title("Cochleagram of Severe earing Loss (Kali Uchis - Tele) (19 channels 3xERB)")
 # plt.colorbar(label="Response")
 # plt.tight_layout()
 # plt.show()
@@ -155,7 +157,8 @@ plt.xlabel("Time (s)")
 plt.ylabel("Channel index (ERB-spaced)")
 tick_idx = np.linspace(0, N-1, 8).astype(int)
 plt.yticks(tick_idx + 1, [f"Ch {i+1}\n({centers[i]:.0f} Hz)" for i in tick_idx])
-plt.title("Cochleagram (30-45s) Telepatia - Kali Uchis")
+# plt.title("Cochleagram (30-45s) Telepatia - Kali Uchis")
+plt.title("Cochleagram of Severe earing Loss (Kali Uchis - Tele) (19 channels 3xERB)")
 plt.savefig("cochleagram.png", dpi=300, bbox_inches="tight")
 
 Cs = C[:, i0:i1]
@@ -167,7 +170,8 @@ plt.plot(np.arange(1, N+1), E)
 
 plt.xlabel("Channel index (low → high)")
 plt.ylabel("Normalized mean energy")
-plt.title("Energy profile over channels (30-45s)")
+# plt.title("Energy profile over channels (30-45s)")
+plt.title("Energy profile of severe over channels (30-45s)")
 plt.tight_layout()
 plt.savefig("energy_profile.png", dpi=300, bbox_inches="tight")
 plt.show()
