@@ -6,3 +6,7 @@
 data/
 audio/
 outputs/
+.python-version
+README.md
+pyproject.toml
+uv.lock
